@@ -1,0 +1,16 @@
+Name: LunarG VulkanTools
+Short Name: VulkanTools
+Version: N/A
+URL: https://github.com/LunarG/VulkanTools
+Update Mechanism: Autoroll
+SOURCE CODE: git clone https://github.com/LunarG/VulkanTools.git
+Revision: 5ce04fabf196c57af002e1d6fbdb2f1e339a89d1
+Security Critical: no
+Shipped: no
+License: Apache-2.0
+License File: src/LICENSE.txt
+
+Description:
+
+The LunarG VulkanTools repository contains the LunarG API Dump
+Vulkan layer.

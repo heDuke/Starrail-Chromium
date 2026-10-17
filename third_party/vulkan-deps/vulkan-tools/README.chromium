@@ -1,0 +1,16 @@
+Name: Khronos Vulkan Tools Components
+Short Name: Vulkan Tools
+Version: N/A
+URL: https://github.com/KhronosGroup/Vulkan-Tools
+Update Mechanism: Autoroll
+SOURCE CODE: git clone https://github.com/KhronosGroup/Vulkan-Tools.git
+Revision: 99140cef98b4ea135141e0040d84c17a1543e5e3
+Security Critical: no
+Shipped: no
+License: Apache-2.0
+License File: src/LICENSE.txt
+
+Description:
+The Khronos Vulkan Tools Components contain the Vulkan Mock Installable
+Client Driver (ICD) as well as the vulkaninfo utility.
+
