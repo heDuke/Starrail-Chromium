@@ -1,0 +1,53 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+[package]
+name = "cargo-fuzztest"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+fuzztest-options = { path = "../options" }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+googletest.workspace = true
+fuzztest = { path = ".." }
+tempfile = "3.27.0"
+
+# Compiled as a [[test]] target so Cargo builds it with the test harness enabled
+# (`rustc --test`) and exposes `CARGO_BIN_EXE_sample_fuzz_crate_bin` to `runner_test`.
+[[test]]
+name = "sample_fuzz_crate_bin"
+path = "test_crates/sample_fuzz_crate/src/lib.rs"
+test = false
+
+# Compiled as a [[test]] target so Cargo builds it with the test harness enabled
+# (`rustc --test`) and exposes `CARGO_BIN_EXE_another_sample_fuzz_crate_bin` to `runner_test`.
+[[test]]
+name = "another_sample_fuzz_crate_bin"
+path = "test_crates/another_sample_fuzz_crate/src/lib.rs"
+test = false
+
+[[test]]
+name = "runner_test"
+path = "tests/runner_test.rs"
+
+[[test]]
+name = "e2e_cli_test"
+path = "tests/e2e_cli_test.rs"
+

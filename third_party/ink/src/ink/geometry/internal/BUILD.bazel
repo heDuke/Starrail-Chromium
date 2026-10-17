@@ -1,0 +1,446 @@
+# Copyright 2024 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
+package(
+    default_visibility = ["//ink:__subpackages__"],
+)
+
+cc_library(
+    name = "algorithms",
+    srcs = ["algorithms.cc"],
+    hdrs = ["algorithms.h"],
+    deps = [
+        ":intersects_internal",
+        "//ink/geometry:affine_transform",
+        "//ink/geometry:envelope",
+        "//ink/geometry:mesh",
+        "//ink/geometry:mutable_mesh",
+        "//ink/geometry:point",
+        "//ink/geometry:rect",
+        "//ink/geometry:segment",
+        "//ink/geometry:triangle",
+        "//ink/geometry:vec",
+        "@abseil-cpp//absl/log:absl_check",
+        "@abseil-cpp//absl/types:span",
+    ],
+)
+
+cc_test(
+    name = "algorithms_test",
+    srcs = ["algorithms_test.cc"],
+    deps = [
+        ":algorithms",
+        "//ink/geometry:affine_transform",
+        "//ink/geometry:angle",
+        "//ink/geometry:envelope",
+        "//ink/geometry:mesh",
+        "//ink/geometry:mesh_test_helpers",
+        "//ink/geometry:mutable_mesh",
+        "//ink/geometry:point",
+        "//ink/geometry:rect",
+        "//ink/geometry:segment",
+        "//ink/geometry:triangle",
+        "//ink/geometry:type_matchers",
+        "//ink/geometry:vec",
+        "@abseil-cpp//absl/container:inlined_vector",
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:status_matchers",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/types:span",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "legacy_segment_intersection",
+    srcs = ["legacy_segment_intersection.cc"],
+    hdrs = ["legacy_segment_intersection.h"],
+    deps = [
+        ":legacy_vector_utils",
+        "//ink/geometry:point",
+        "//ink/geometry:segment",
+        "//ink/geometry:vec",
+        "@abseil-cpp//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "legacy_segment_intersection_test",
+    srcs = ["legacy_segment_intersection_test.cc"],
+    deps = [
+        ":legacy_segment_intersection",
+        "//ink/geometry:point",
+        "//ink/geometry:segment",
+        "//ink/geometry:type_matchers",
+        "@abseil-cpp//absl/strings",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "legacy_triangle_contains",
+    srcs = ["legacy_triangle_contains.cc"],
+    hdrs = ["legacy_triangle_contains.h"],
+    deps = [
+        ":legacy_vector_utils",
+        "//ink/geometry:point",
+        "//ink/geometry:triangle",
+    ],
+)
+
+cc_test(
+    name = "legacy_triangle_contains_test",
+    srcs = ["legacy_triangle_contains_test.cc"],
+    deps = [
+        ":legacy_triangle_contains",
+        "//ink/geometry:point",
+        "//ink/geometry:triangle",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "legacy_vector_utils",
+    srcs = ["legacy_vector_utils.cc"],
+    hdrs = ["legacy_vector_utils.h"],
+    deps = [
+        "//ink/geometry:point",
+        "//ink/geometry:vec",
+    ],
+)
+
+cc_test(
+    name = "legacy_vector_utils_test",
+    srcs = ["legacy_vector_utils_test.cc"],
+    deps = [
+        ":legacy_vector_utils",
+        "//ink/geometry:point",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "lerp",
+    srcs = ["lerp.cc"],
+    hdrs = ["lerp.h"],
+    deps = [
+        "//ink/color",
+        "//ink/geometry:angle",
+        "//ink/geometry:point",
+        "//ink/geometry:vec",
+        "//ink/types:duration",
+    ],
+)
+
+cc_test(
+    name = "lerp_test",
+    srcs = ["lerp_test.cc"],
+    deps = [
+        ":lerp",
+        "//ink/color",
+        "//ink/color:type_matchers",
+        "//ink/geometry:angle",
+        "//ink/geometry:point",
+        "//ink/geometry:type_matchers",
+        "//ink/geometry:vec",
+        "//ink/types:duration",
+        "//ink/types:type_matchers",
+        "@fuzztest//fuzztest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "modulo",
+    srcs = ["modulo.cc"],
+    hdrs = ["modulo.h"],
+    deps = [
+        "@abseil-cpp//absl/log:absl_check",
+    ],
+)
+
+cc_test(
+    name = "modulo_test",
+    srcs = ["modulo_test.cc"],
+    deps = [
+        ":modulo",
+        "@fuzztest//fuzztest",
+        "@fuzztest//fuzztest:fuzztest_gtest_main",
+    ],
+)
+
+cc_library(
+    name = "circle",
+    srcs = ["circle.cc"],
+    hdrs = ["circle.h"],
+    deps = [
+        "//ink/geometry:angle",
+        "//ink/geometry:point",
+        "//ink/geometry:vec",
+        "@abseil-cpp//absl/log:absl_check",
+        "@abseil-cpp//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "polyline_processing",
+    srcs = ["polyline_processing.cc"],
+    hdrs = ["polyline_processing.h"],
+    deps = [
+        ":algorithms",
+        ":static_rtree",
+        "//ink/geometry:distance",
+        "//ink/geometry:envelope",
+        "//ink/geometry:point",
+        "//ink/geometry:rect",
+        "//ink/geometry:segment",
+        "@abseil-cpp//absl/log:absl_check",
+        "@abseil-cpp//absl/types:span",
+    ],
+)
+
+cc_test(
+    name = "polyline_processing_test",
+    srcs = ["polyline_processing_test.cc"],
+    deps = [
+        ":polyline_processing",
+        ":static_rtree",
+        "//ink/geometry:fuzz_domains",
+        "//ink/geometry:point",
+        "//ink/geometry:rect",
+        "//ink/geometry:segment",
+        "//ink/geometry:type_matchers",
+        "@fuzztest//fuzztest",
+        "@fuzztest//fuzztest:fuzztest_gtest_main",
+    ],
+)
+
+cc_test(
+    name = "circle_test",
+    srcs = ["circle_test.cc"],
+    deps = [
+        ":circle",
+        "//ink/geometry:angle",
+        "//ink/geometry:point",
+        "//ink/geometry:segment",
+        "//ink/geometry:type_matchers",
+        "//ink/geometry:vec",
+        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/strings:str_format",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "test_matchers",
+    testonly = 1,
+    srcs = ["test_matchers.cc"],
+    hdrs = ["test_matchers.h"],
+    deps = [
+        ":circle",
+        ":outline_processing",
+        "//:gtest_for_library_testonly",
+        "//ink/geometry:point",
+        "//ink/geometry:type_matchers",
+        "@abseil-cpp//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "mesh_packing",
+    srcs = ["mesh_packing.cc"],
+    hdrs = ["mesh_packing.h"],
+    deps = [
+        ":mesh_constants",
+        "//ink/geometry:mesh_format",
+        "//ink/geometry:mesh_packing_types",
+        "//ink/geometry:point",
+        "//ink/types:small_array",
+        "//ink/types/internal:float",
+        "@abseil-cpp//absl/algorithm:container",
+        "@abseil-cpp//absl/base:nullability",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:flat_hash_set",
+        "@abseil-cpp//absl/container:inlined_vector",
+        "@abseil-cpp//absl/log:absl_check",
+        "@abseil-cpp//absl/log:absl_log",
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:status_macros",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/types:span",
+    ],
+)
+
+cc_test(
+    name = "mesh_packing_test",
+    srcs = ["mesh_packing_test.cc"],
+    deps = [
+        ":mesh_packing",
+        "//ink/geometry:mesh_format",
+        "//ink/geometry:mesh_packing_types",
+        "//ink/geometry:point",
+        "//ink/geometry:type_matchers",
+        "//ink/types:small_array",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:inlined_vector",
+        "@abseil-cpp//absl/log:absl_check",
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:status_matchers",
+        "@abseil-cpp//absl/types:span",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "mesh_constants",
+    hdrs = ["mesh_constants.h"],
+)
+
+cc_library(
+    name = "point_tessellation_helper",
+    hdrs = ["point_tessellation_helper.h"],
+    deps = [
+        "//ink/geometry:point",
+        "@abseil-cpp//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "convex_hull_helper",
+    hdrs = ["convex_hull_helper.h"],
+    deps = [
+        "//ink/geometry:point",
+        "//ink/geometry:triangle",
+        "//ink/geometry:vec",
+        "@abseil-cpp//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "static_rtree",
+    srcs = ["static_rtree.cc"],
+    hdrs = ["static_rtree.h"],
+    deps = [
+        ":intersects_internal",
+        "//ink/geometry:envelope",
+        "//ink/geometry:rect",
+        "//ink/types:small_array",
+        "@abseil-cpp//absl/algorithm:container",
+        "@abseil-cpp//absl/container:inlined_vector",
+        "@abseil-cpp//absl/functional:function_ref",
+        "@abseil-cpp//absl/log:absl_check",
+        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/types:span",
+    ],
+)
+
+cc_test(
+    name = "static_rtree_test",
+    srcs = ["static_rtree_test.cc"],
+    deps = [
+        ":static_rtree",
+        "//ink/geometry:distance",
+        "//ink/geometry:point",
+        "//ink/geometry:rect",
+        "//ink/geometry:type_matchers",
+        "//ink/types:small_array",
+        "@abseil-cpp//absl/log:absl_check",
+        "@abseil-cpp//absl/types:span",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "static_rtree_benchmark",
+    srcs = ["static_rtree_benchmark.cc"],
+    deps = [
+        ":static_rtree",
+        "//ink/geometry:rect",
+        "@abseil-cpp//absl/types:span",
+        "@google_benchmark//:benchmark_main",
+        "@googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "intersects_internal",
+    srcs = ["intersects_internal.cc"],
+    hdrs = ["intersects_internal.h"],
+    deps = [
+        "//ink/geometry:point",
+        "//ink/geometry:quad",
+        "//ink/geometry:rect",
+        "//ink/geometry:segment",
+        "//ink/geometry:triangle",
+        "//ink/geometry:vec",
+    ],
+)
+
+cc_library(
+    name = "generic_tessellator",
+    hdrs = ["generic_tessellator.h"],
+    deps = [
+        "@abseil-cpp//absl/base:core_headers",
+        "@abseil-cpp//absl/log:absl_check",
+        "@abseil-cpp//absl/types:span",
+        "@libtess2",
+    ],
+)
+
+cc_test(
+    name = "generic_tessellator_test",
+    srcs = ["generic_tessellator_test.cc"],
+    deps = [
+        ":generic_tessellator",
+        "//ink/geometry:point",
+        "//ink/geometry/internal:point_tessellation_helper",
+        "@googletest//:gtest_main",
+        "@libtess2",
+    ],
+)
+
+cc_library(
+    name = "outline_processing",
+    srcs = ["outline_processing.cc"],
+    hdrs = ["outline_processing.h"],
+    deps = [
+        ":algorithms",
+        ":intersects_internal",
+        "//ink/geometry:point",
+        "//ink/geometry:rect",
+        "//ink/geometry:segment",
+        "//ink/geometry:vec",
+        "@abseil-cpp//absl/algorithm:container",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:inlined_vector",
+        "@abseil-cpp//absl/types:span",
+    ],
+)
+
+cc_test(
+    name = "outline_processing_test",
+    srcs = ["outline_processing_test.cc"],
+    deps = [
+        ":outline_processing",
+        ":test_matchers",
+        "//ink/geometry:point",
+        "//ink/geometry:rect",
+        "//ink/geometry:triangle",
+        "@googletest//:gtest_main",
+    ],
+)

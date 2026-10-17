@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+# Cancel in-progress runs for pull requests, but not for master branch pushes
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: 'Build'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Check out repository'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: 'Set up JDK 26 for compilation'
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+        with:
+          java-version: 26
+          distribution: 'temurin'
+          cache: 'maven'
+      - name: 'Install'
+        shell: bash
+        run: mvn -B -P!standard-with-extra-repos install -U -DskipTests=true
+      - name: 'Javadoc Test Run'
+        shell: bash
+        run: mvn -B -P!standard-with-extra-repos javadoc:aggregate -U
+      - name: 'Upload build artifacts'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: truth-jars
+          path: |
+            **/target/*.jar
+            !**/target/*-sources.jar
+            !**/target/*-javadoc.jar
+
+  test:
+    name: "Test with JDK ${{ matrix.java }}"
+    needs: build
+    strategy:
+      matrix:
+        java: [ 8, 17, 25 ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Check out repository'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: 'Set up JDK ${{ matrix.java }} for testing'
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+        with:
+          java-version: ${{ matrix.java }}
+          distribution: 'temurin'
+          cache: 'maven'
+      - name: 'Download build artifacts'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: truth-jars
+      - name: 'Unpack artifacts'
+        shell: bash
+        run: |
+          for f in $(find . -name "*.jar" ! -name "*-gwt.jar"); do
+            dest="${f%/target/*}/target/classes"
+            mkdir -p "$dest"
+            unzip -o "$f" -d "$dest"
+          done
+      - name: 'Test'
+        shell: bash
+        run: mvn -B -P!standard-with-extra-repos verify -U -Dmaven.javadoc.skip=true -Dmaven.main.skip=true
+
+  publish_snapshot:
+    name: 'Publish snapshot'
+    needs: [build, test]
+    if: github.event_name == 'push' && github.repository == 'google/truth'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Check out repository'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: 'Set up JDK 26'
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+        with:
+          java-version: 26
+          distribution: 'temurin'
+          cache: 'maven'
+          server-id: central
+          server-username: CI_DEPLOY_USERNAME
+          server-password: CI_DEPLOY_PASSWORD
+      - name: 'Publish'
+        env:
+          CI_DEPLOY_USERNAME: ${{ secrets.CI_DEPLOY_USERNAME }}
+          CI_DEPLOY_PASSWORD: ${{ secrets.CI_DEPLOY_PASSWORD }}
+        run: mvn -B clean deploy -DskipTests=true
+
+  generate_docs:
+    permissions:
+      contents: write
+    name: 'Generate latest docs'
+    needs: [build, test]
+    if: github.event_name == 'push' && github.repository == 'google/truth'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Check out repository'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: 'Set up JDK 26'
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+        with:
+          java-version: 26
+          distribution: 'temurin'
+          cache: 'maven'
+      - name: 'Generate latest docs'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./util/generate-latest-docs.sh

@@ -1,0 +1,14 @@
+.cache
+.coverage
+.eggs
+.tox
+.vscode
+*.egg
+*.egg-info
+*.pyc
+*~
+build
+coverage.xml
+dist
+docs/_build
+venv*

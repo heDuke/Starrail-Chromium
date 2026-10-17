@@ -1,0 +1,90 @@
+// Copyright 2024 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "ink/geometry/internal/test_matchers.h"
+
+#include <algorithm>
+#include <cmath>
+
+#include "gmock/gmock.h"
+#include "absl/strings/str_cat.h"
+#include "ink/geometry/internal/circle.h"
+#include "ink/geometry/internal/outline_processing.h"
+#include "ink/geometry/point.h"
+#include "ink/geometry/type_matchers.h"
+
+namespace ink::geometry_internal {
+namespace {
+
+using ::testing::AllOf;
+using ::testing::ExplainMatchResult;
+using ::testing::FloatEq;
+using ::testing::FloatNear;
+using ::testing::Matcher;
+using ::testing::PrintToString;
+using ::testing::Property;
+
+MATCHER_P(CircleEqMatcher, expected,
+          absl::StrCat(negation ? "doesn't equal" : "equals",
+                       " Center (expected: ", PrintToString(expected), ")")) {
+  return ExplainMatchResult(
+      AllOf(Property("Center", &Circle::Center, PointEq(expected.Center())),
+            Property("Radius", &Circle::Radius, FloatEq(expected.Radius()))),
+      arg, result_listener);
+}
+
+MATCHER_P2(CircleNearMatcher, expected, tolerance,
+           absl::StrCat(negation ? "doesn't approximately equal"
+                                 : "approximately equals",
+                        " Center (expected: ", PrintToString(expected),
+                        ", tolerance: ", PrintToString(tolerance), ")")) {
+  return ExplainMatchResult(
+      AllOf(Property("Center", &Circle::Center,
+                     PointNear(expected.Center(), tolerance)),
+            Property("Radius", &Circle::Radius,
+                     FloatNear(expected.Radius(), tolerance))),
+      arg, result_listener);
+}
+
+MATCHER_P2(ShapeOutlineNearMatcher, expected, tolerance, "") {
+  float tol = tolerance;
+  return std::equal(
+      arg.Chains().begin(), arg.Chains().end(), expected.Chains().begin(),
+      expected.Chains().end(), [tol](const auto& a, const auto& b) {
+        return a.Orientation() == b.Orientation() &&
+               std::equal(a.Vertices().begin(), a.Vertices().end(),
+                          b.Vertices().begin(), b.Vertices().end(),
+                          [tol](Point p1, Point p2) {
+                            return std::abs(p1.x - p2.x) <= tol &&
+                                   std::abs(p1.y - p2.y) <= tol;
+                          });
+      });
+}
+
+}  // namespace
+
+Matcher<Circle> CircleEq(const Circle& expected) {
+  return CircleEqMatcher(expected);
+}
+
+Matcher<Circle> CircleNear(const Circle& expected, float tolerance) {
+  return CircleNearMatcher(expected, tolerance);
+}
+
+Matcher<ShapeOutline> ShapeOutlineNear(const ShapeOutline& expected,
+                                       float tolerance) {
+  return ShapeOutlineNearMatcher(expected, tolerance);
+}
+
+}  // namespace ink::geometry_internal
