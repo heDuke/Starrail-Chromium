@@ -1,0 +1,11 @@
+"depth","name","map_name","count","cumulative_count","size","cumulative_size"
+0,"com.android.server.pm.PackageManagerService [ROOT_JNI_GLOBAL]","JAVA",1,109541,450,5749404
+1,"com.android.server.pm.ComponentResolver","JAVA",1,60095,37,3281092
+0,"java.lang.String [ROOT_INTERNED_STRING]","JAVA",41197,41197,1845640,1845640
+2,"com.android.server.pm.ComponentResolver$ActivityIntentResolver","JAVA",1,31934,52,1768143
+3,"android.util.ArrayMap","JAVA",8,18910,200,1261878
+4,"java.lang.Object[]","JAVA",7,18895,52020,1235626
+1,"com.android.server.pm.Settings","JAVA",1,29766,140,1170047
+0,"java.lang.Class<android.icu.text.Transliterator> [ROOT_STICKY_CLASS]","JAVA",1,12552,163,1120275
+1,"android.icu.text.TransliteratorRegistry","JAVA",1,12545,20,1119648
+2,"java.util.Collections$SynchronizedMap","JAVA",2,10614,56,1063424
