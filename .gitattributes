@@ -57,3 +57,6 @@ DIR_METADATA   text eol=lf
 
 # Skip Tricium by default on files in third_party.
 third_party/** -tricium
+
+# Large upstream source/test data retained through Git LFS.
+third_party/swiftshader/tests/regres/testlists/vk-master-NOT_SUPPORTED.txt filter=lfs diff=lfs merge=lfs -text

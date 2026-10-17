@@ -1,0 +1,79 @@
+{
+  "probes": {
+    "perfetto": {
+      "trace_browser_startup": true
+      "textproto":
+        '''
+        buffers {
+          size_kb: 102400
+          fill_policy: RING_BUFFER
+        }
+        data_sources {
+          config {
+            name: "track_event"
+            track_event_config {
+              disabled_categories: "*"
+              enabled_categories: "benchmark"
+              enabled_categories: "toplevel"
+              enabled_categories: "startup"
+              enabled_categories: "blink.user_timing"
+              enabled_categories: "navigation"
+              enabled_categories: "loading"
+              timestamp_unit_multiplier: 1000
+              enable_thread_time_sampling: true
+            }
+          }
+        }
+        data_sources {
+          config {
+            name: "org.chromium.histogram_sample"
+            chromium_histogram_samples {
+              histograms {
+                histogram_name: "Startup.FirstWebContents.NonEmptyPaint3"
+              }
+              histograms {
+                histogram_name: "InitialWebUI.Startup.ReloadButton.FirstContentfulPaint"
+              }
+            }
+          }
+        }
+        data_sources {
+          config {
+            name: "org.chromium.trace_metadata2"
+          }
+        }
+        '''
+    }
+    "trace_processor": {
+      "queries": [
+        {
+          "name": "browser_window_first_paint"
+          "sql":
+            '''
+            SELECT
+              (paint.ts - (SELECT min(ts) FROM slice)) / 1e6 AS browser_window_first_paint_ms
+            FROM slice AS paint
+            WHERE paint.name LIKE '%Startup.BrowserWindow.FirstPaint'
+            LIMIT 1
+            '''
+        }
+        {
+          "name": "reload_button_fcp"
+          "sql":
+            '''
+            SELECT
+              a_sample.int_value AS reload_button_fcp_ms
+            FROM slice s
+            JOIN args a_name ON s.arg_set_id = a_name.arg_set_id
+            JOIN args a_sample ON s.arg_set_id = a_sample.arg_set_id
+            WHERE s.name = 'HistogramSample'
+              AND a_name.key = 'chrome_histogram_sample.name'
+              AND a_name.string_value = 'InitialWebUI.Startup.ReloadButton.FirstContentfulPaint'
+              AND a_sample.key = 'chrome_histogram_sample.sample'
+            LIMIT 1
+            '''
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,50 @@
+// Copyright 2025 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+{
+  args: {
+    CLICK_INPUT_SOURCE: touch
+    BASE_URL: https://one.google.com/storage
+  }
+  template: {
+    pages: {
+      Drive-Cleanup: {
+        login: google
+        blocks: {
+          // Preload the Google One page.
+          drive-page-load: {
+            template: ./action-blocks/load-drive-page.hjson
+            args: {
+              URL: $[BASE_URL]
+            }
+            unbound_args: [
+              BASE_URL
+            ]
+          }
+          // Delete the first 32 Large Drive files.
+          large-drive-files-page: {
+            template: ./action-blocks/load-drive-page.hjson
+            args: {
+              URL: $[BASE_URL]/management/drive/large
+            }
+            unbound_args: [
+              BASE_URL
+            ]
+          }
+          confirm-delete-large-files: ./action-blocks/select-confirm-delete.hjson
+          // Delete all first 32 items in the trash bin.
+          files-in-trash-page: {
+            template: ./action-blocks/load-drive-page.hjson
+            args: {
+              URL: $[BASE_URL]/management/drive/trash
+            }
+            unbound_args: [
+              BASE_URL
+            ]
+          }
+          confirm-delete-file-in-trash: ./action-blocks/select-confirm-delete.hjson
+        }
+      }
+    }
+  }
+}

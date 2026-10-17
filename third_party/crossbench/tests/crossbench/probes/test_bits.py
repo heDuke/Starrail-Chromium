@@ -1,0 +1,315 @@
+# Copyright 2026 The Chromium Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+from typing import Any
+from unittest import mock
+
+from typing_extensions import override
+
+from crossbench import path as pth
+from crossbench.probes.bits import BitsProbe, BitsProbeContext
+from crossbench.probes.probe import ProbeIncompatibleBrowser
+from crossbench.probes.results import EmptyProbeResult, LocalProbeResult
+from tests import test_helper
+from tests.crossbench.probes.helper import BaseProbeTestCase
+
+
+class BitsProbeTestCase(BaseProbeTestCase):
+
+  def setUp(self) -> None:
+    super().setUp()
+    self.bits_path = pth.LocalPath(self.platform.default_tmp_dir) / "bits"
+    self.fs.create_file(self.bits_path)
+
+  def test_bits_probe_parsing_valid(self) -> None:
+    probe = BitsProbe.parse_dict({
+        "bits_path": str(self.bits_path),
+        "bits_out": "run_id",
+        "duration": "1s"
+    })
+    self.assertEqual(probe.bits_path, self.bits_path)
+    self.assertEqual(probe.bits_out, "run_id")
+    self.assertEqual(probe.duration, dt.timedelta(seconds=1))
+
+  def test_bits_probe_parsing_default_out(self) -> None:
+    probe = BitsProbe.parse_dict({
+        "bits_path": str(self.bits_path),
+    })
+    self.assertEqual(probe.bits_out, "")
+    run = self.mock_run()
+    now = dt.datetime(2026, 7, 2, 17, 0, 55)
+    with mock.patch("crossbench.probes.bits.dt.datetime") as mock_datetime:
+      mock_datetime.now.return_value = now
+      context = probe.create_context(run)
+      self.assertEqual(context.bits_out_id, "20260702_170055")
+
+  def test_distinct_runs_have_distinct_ids(self) -> None:
+    probe = BitsProbe(self.bits_path)
+    run1 = self.mock_run()
+    run2 = self.mock_run()
+
+    now = dt.datetime(2026, 7, 2, 17, 0, 55)
+    later = dt.datetime(2026, 7, 2, 17, 1, 10)
+    with mock.patch("crossbench.probes.bits.dt.datetime") as mock_datetime:
+      mock_datetime.now.side_effect = [now, later]
+      context1 = probe.create_context(run1)
+      context2 = probe.create_context(run2)
+
+    self.assertEqual(context1.bits_out_id, "20260702_170055")
+    self.assertEqual(context2.bits_out_id, "20260702_170110")
+
+  def test_bits_probe_parsing_missing_path(self) -> None:
+    with self.assertRaises(argparse.ArgumentTypeError):
+      BitsProbe.parse_dict({"bits_out": "run_id"})
+
+  def test_bits_probe_parsing_zero_duration(self) -> None:
+    with self.assertRaises(argparse.ArgumentTypeError):
+      BitsProbe.parse_dict({
+          "bits_path": str(self.bits_path),
+          "bits_out": "run_id",
+          "duration": "0s"
+      })
+
+  def test_bits_probe_parsing_subsecond_duration(self) -> None:
+    with self.assertRaises(ValueError):
+      BitsProbe.parse_dict({
+          "bits_path": str(self.bits_path),
+          "bits_out": "run_id",
+          "duration": "500ms"
+      })
+
+  def test_bits_probe_parsing_negative_duration(self) -> None:
+    with self.assertRaises(argparse.ArgumentTypeError):
+      BitsProbe.parse_dict({
+          "bits_path": str(self.bits_path),
+          "bits_out": "run_id",
+          "duration": "-5s"
+      })
+
+  def test_bits_probe_parsing_default_duration(self) -> None:
+    probe = BitsProbe.parse_dict({
+        "bits_path": str(self.bits_path),
+        "bits_out": "test_run_id"
+    })
+    self.assertEqual(probe.bits_path, self.bits_path)
+    self.assertEqual(probe.bits_out, "test_run_id")
+    self.assertEqual(probe.duration, BitsProbe.DEFAULT_DURATION)
+
+  def test_bits_probe_parsing_custom_duration(self) -> None:
+    probe = BitsProbe.parse_dict({
+        "bits_path": str(self.bits_path),
+        "bits_out": "test_run_id",
+        "duration": "2m"
+    })
+    self.assertEqual(probe.bits_path, self.bits_path)
+    self.assertEqual(probe.bits_out, "test_run_id")
+    self.assertEqual(probe.duration, dt.timedelta(minutes=2))
+    self.assertEqual(probe.bits_device, "")
+
+  def test_bits_probe_parsing_device(self) -> None:
+    probe = BitsProbe.parse_dict({
+        "bits_path": str(self.bits_path),
+        "bits_out": "test_run_id",
+        "device": "custom_id",
+    })
+    self.assertEqual(probe.bits_device, "custom_id")
+
+  def test_bits_probe_parsing_device_empty(self) -> None:
+    probe_empty = BitsProbe.parse_dict({
+        "bits_path": str(self.bits_path),
+        "bits_out": "test_run_id",
+        "device": "",
+    })
+    self.assertEqual(probe_empty.bits_device, "")
+
+  def test_bits_probe_parsing_no_port_specified(self) -> None:
+    probe = BitsProbe.parse_dict({
+        "bits_path": str(self.bits_path),
+        "bits_out": "test_run_id"
+    })
+    self.assertIsNone(probe.port)
+
+  def test_bits_probe_parsing_custom_port(self) -> None:
+    probe = BitsProbe.parse_dict({
+        "bits_path": str(self.bits_path),
+        "bits_out": "test_run_id",
+        "port": 1234
+    })
+    self.assertEqual(probe.port, 1234)
+
+  def test_bits_probe_parsing_zero_port(self) -> None:
+    with self.assertRaises(argparse.ArgumentTypeError):
+      BitsProbe.parse_dict({
+          "bits_path": str(self.bits_path),
+          "bits_out": "run_id",
+          "port": 0
+      })
+
+  def test_bits_probe_parsing_negative_port(self) -> None:
+    with self.assertRaises(argparse.ArgumentTypeError):
+      BitsProbe.parse_dict({
+          "bits_path": str(self.bits_path),
+          "bits_out": "run_id",
+          "port": -8080
+      })
+
+  def test_validate_browser_incompatible(self) -> None:
+    probe = BitsProbe(self.bits_path, "test_run_id")
+    browser = self.magic_mock_browser
+    browser.platform.is_android = False
+    env = mock.MagicMock()
+    with self.assertRaises(ProbeIncompatibleBrowser):
+      probe.validate_browser(env, browser)
+
+  def _check_probe_lifecycle(self,
+                             bits_device: str,
+                             port: int | None = None) -> None:
+    probe = BitsProbe(
+        self.bits_path,
+        "test_run_id",
+        bits_device=bits_device,
+        duration=dt.timedelta(seconds=120),
+        port=port,
+    )
+    run = self.mock_run()
+    run.browser_session.browser.platform.serial_id = "serial"
+
+    host_platform = run.browser_session.browser.host_platform
+    host_platform.popen = mock.MagicMock()
+    host_platform.sh = mock.MagicMock()
+
+    context = probe.create_context(run)
+
+    # 1. start() should be a no-op
+    context.start()
+    host_platform.popen.assert_not_called()
+
+    # 2. start_story_run() should spawn BITS
+    context.start_story_run()
+    host_platform.popen.assert_called_once()
+    call_args = host_platform.popen.call_args.args
+
+    expected_device_args: list[str] = []
+    if bits_device:
+      expected_device_args += ["--device", bits_device]
+    if port is not None:
+      expected_device_args += ["--service_port", str(port)]
+
+    self.assertEqual(
+        call_args,
+        (
+            self.bits_path,
+            "--create",
+            "test_run_id",
+            "--duration",
+            "120s",
+            *expected_device_args,
+        ),
+    )
+    self.assertIn("stdout", host_platform.popen.call_args.kwargs)
+    self.assertIn("stderr", host_platform.popen.call_args.kwargs)
+
+    # 3. stop_story_run() should stop BITS
+    context.stop_story_run()
+    host_platform.sh.assert_called_once()
+    expected_stop_args: list[str] = []
+    if port is not None:
+      expected_stop_args += ["--service_port", str(port)]
+
+    self.assertEqual(
+        host_platform.sh.call_args.args,
+        (
+            self.bits_path,
+            "--stop",
+            "test_run_id",
+            *expected_stop_args,
+        ),
+    )
+    self.assertIn("stdout", host_platform.sh.call_args.kwargs)
+    self.assertIn("stderr", host_platform.sh.call_args.kwargs)
+
+    # Reset mocks to verify that the final stop phase is a clean no-op
+    host_platform.popen.reset_mock()
+    host_platform.sh.reset_mock()
+
+    # 4. stop() should be a no-op
+    context.stop()
+    host_platform.popen.assert_not_called()
+    host_platform.sh.assert_not_called()
+
+    self.assertIsInstance(context.teardown(), LocalProbeResult)
+
+  def test_probe_lifecycle(self) -> None:
+    self._check_probe_lifecycle(bits_device="")
+
+  def test_probe_lifecycle_with_device(self) -> None:
+    self._check_probe_lifecycle(bits_device="device_id_123")
+
+  def test_probe_lifecycle_with_port(self) -> None:
+    self._check_probe_lifecycle(bits_device="", port=1234)
+
+  def test_probe_lifecycle_with_device_and_port(self) -> None:
+    self._check_probe_lifecycle(bits_device="device_id_123", port=1234)
+
+
+class BitsProbeResultsFileTestCase(BaseProbeTestCase):
+  MOCK_NOW = dt.datetime(2026, 7, 2, 17, 0, 55)
+  MOCK_NOW_STR = "20260702_170055"
+
+  @override
+  def setUp(self) -> None:
+    super().setUp()
+    tmp_dir = pth.LocalPath(self.platform.default_tmp_dir)
+    self.bits_path = tmp_dir / "bits"
+    self.fs.create_file(self.bits_path)
+    self.run = self.mock_run(result_path=tmp_dir / "bits.json")
+    self.host_platform = self.run.browser_session.browser.host_platform
+    self.host_platform.popen = mock.MagicMock()
+    self.host_platform.sh = mock.MagicMock()
+
+  def _create_context(self, bits_out: str) -> BitsProbeContext:
+    probe = BitsProbe(self.bits_path, bits_out=bits_out)
+    with mock.patch("crossbench.probes.bits.dt.datetime") as mock_datetime:
+      mock_datetime.now.return_value = self.MOCK_NOW
+      context = probe.create_context(self.run)
+    return context
+
+  def _teardown(self, context: BitsProbeContext) -> LocalProbeResult:
+    result = context.teardown()
+    self.assertIsInstance(result, LocalProbeResult)
+    self.assertTrue(context.local_result_path.exists())
+    return result
+
+  def _test_output(self, bits_out: str) -> Any:
+    context = self._create_context(bits_out)
+    self.assertFalse(context.local_result_path.exists())
+    context.start_story_run()
+    self.assertTrue(context.local_result_path.exists())
+    result = self._teardown(context)
+    with result.json.open("r", encoding="utf-8") as f:
+      return json.load(f)
+
+  def test_explicit_out_id(self) -> None:
+    output = self._test_output("explicit_id")
+    self.assertEqual(output, {"bits_out_id": "explicit_id"})
+
+  def test_auto_generated_out_id(self) -> None:
+    output = self._test_output("")
+    self.assertEqual(output, {"bits_out_id": self.MOCK_NOW_STR})
+
+  def test_without_start(self) -> None:
+    context = self._create_context("test_run_id")
+    self.assertFalse(context.local_result_path.exists())
+    result = context.teardown()
+    self.assertIsInstance(result, EmptyProbeResult)
+    self.assertFalse(context.local_result_path.exists())
+
+
+if __name__ == "__main__":
+  test_helper.run_pytest(__file__)

@@ -1,0 +1,23 @@
+bsheedy@chromium.org
+
+# Browser Perf Engprod
+ammedina@google.com
+carlosbarrera@google.com
+davidsegovia@google.com
+faridzad@google.com
+ggj@google.com
+gmarcoesau@google.com
+jeffyoon@google.com
+johnchen@chromium.org
+jrtm@google.com
+migueloruiz@google.com
+mordeckimarcin@google.com
+seawardt@google.com
+sruslan@google.com
+viktarzinkou@google.com
+wenbinzhang@google.com
+
+# Submodules.
+per-file .gitmodules=*
+per-file DEPS=*
+per-file third_party/webpagereplay=*
