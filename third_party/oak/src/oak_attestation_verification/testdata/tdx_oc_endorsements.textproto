@@ -1,0 +1,7 @@
+# proto-file: proto/attestation/endorsement.proto
+# proto-message: oak.attestation.v1.Endorsements
+#
+# Endorsements for an Oak Containers chain on Intel TDX.
+#
+initial {}
+platform {}
