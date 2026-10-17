@@ -1,0 +1,54 @@
+# Copyright 2024 The Chromium Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("../../scripts/build/ninja/copy.gni")
+import("../../scripts/build/typescript/typescript.gni")
+
+ts_library("browser-globals") {
+  testonly = true
+  sources = [ "browser-globals.ts" ]
+}
+
+ts_library("mocha-interface") {
+  testonly = true
+  sources = [ "mocha-interface.ts" ]
+  deps = [
+    ":browser-globals",
+    "../../front_end/testing",
+  ]
+}
+
+ts_library("mocha-adapter-browser") {
+  testonly = true
+  sources = [ "mocha-adapter-browser.ts" ]
+  deps = [
+    ":browser-globals",
+    ":mocha-interface",
+  ]
+}
+
+node_ts_library("karma") {
+  sources = [
+    "karma.conf.ts",
+    "mocha-hooks.ts",
+    "run-mocha.ts",
+  ]
+  deps = [
+    "../../front_end/testing",
+    "../conductor:implementation",
+    "../shared",
+  ]
+  data_deps = [
+    ":context",
+    ":mocha-adapter-browser",
+    ":mocha-interface",
+  ]
+}
+
+copy_to_gen("context") {
+  sources = [
+    "context.html",
+    "debug.html",
+  ]
+}

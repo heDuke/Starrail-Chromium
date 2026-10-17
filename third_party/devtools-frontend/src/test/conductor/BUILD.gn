@@ -1,0 +1,38 @@
+# Copyright 2020 The Chromium Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("../../scripts/build/ninja/copy.gni")
+import("../../scripts/build/typescript/typescript.gni")
+
+group("conductor") {
+  deps = [
+    ":implementation",
+    "../../scripts/hosted_mode",
+  ]
+}
+
+node_ts_library("implementation") {
+  deps = [ "../../front_end/testing:test_id_generation" ]
+
+  sources = [
+    "async-scope.ts",
+    "commandline.ts",
+    "custom-query-handlers.ts",
+    "diff-utils.ts",
+    "events.ts",
+    "inspected_page.ts",
+    "karma-resultsdb-reporter.ts",
+    "mocha-interface-helpers.ts",
+    "mocha-interface.ts",
+    "paths.ts",
+    "platform.ts",
+    "resultsdb.ts",
+    "screenshot-error.ts",
+    "sharding.ts",
+    "test_config.ts",
+    "test_expectations.ts",
+    "test_expectations_parser.js",
+    "test_server.ts",
+  ]
+}

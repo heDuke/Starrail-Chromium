@@ -1,0 +1,733 @@
+// Copyright 2025 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+import {assert} from 'chai';
+import sinon from 'sinon';
+
+import * as Common from '../../core/common/common.js';
+import * as SDK from '../../core/sdk/sdk.js';
+import type * as TextUtils from '../../core/text_utils/text_utils.js';
+import type * as Protocol from '../../generated/protocol.js';
+import * as AIAssistance from '../../models/ai_assistance/ai_assistance.js';
+import * as Bindings from '../../models/bindings/bindings.js';
+import * as Trace from '../../models/trace/trace.js';
+import * as Workspace from '../../models/workspace/workspace.js';
+import * as TraceBounds from '../../services/trace_bounds/trace_bounds.js';
+import * as Tracing from '../../services/tracing/tracing.js';
+import {
+  dispatchClickEvent,
+  renderElementIntoDOM,
+} from '../../testing/DOMHelpers.js';
+import {
+  deinitializeGlobalVars,
+  initializeGlobalVars,
+  registerNoopActions,
+} from '../../testing/EnvironmentHelpers.js';
+import {type StubbedFileManager, stubFileManager} from '../../testing/FileManagerHelpers.js';
+import {makeCompleteEvent} from '../../testing/TraceHelpers.js';
+import {TraceLoader} from '../../testing/TraceLoader.js';
+import * as UI from '../../ui/legacy/legacy.js';
+
+import * as TimelineComponents from './components/components.js';
+import * as Timeline from './timeline.js';
+
+async function contentDataToFile(contentData: TextUtils.ContentData.ContentData): Promise<Trace.Types.File.TraceFile> {
+  if (contentData.isTextContent) {
+    return JSON.parse(contentData.text) as Trace.Types.File.TraceFile;
+  }
+
+  const decoded = Common.Base64.decode(contentData.base64);
+  const text = await Common.Gzip.arrayBufferToString(decoded.buffer);
+  return JSON.parse(text) as Trace.Types.File.TraceFile;
+}
+
+describe('TimelinePanel', function() {
+  before(async () => {
+    await initializeGlobalVars();
+  });
+
+  after(async () => {
+    await deinitializeGlobalVars();
+  });
+
+  let timeline: Timeline.TimelinePanel.TimelinePanel;
+  let traceModel: Trace.TraceModel.Model;
+  let resourceLoader: SDK.PageResourceLoader.PageResourceLoader;
+  let targetManager: SDK.TargetManager.TargetManager;
+  let isolateManager: SDK.IsolateManager.IsolateManager;
+  beforeEach(() => {
+    registerNoopActions(
+        ['timeline.toggle-recording', 'timeline.record-reload', 'timeline.show-history', 'components.collect-garbage']);
+    targetManager = SDK.TargetManager.TargetManager.instance();
+    isolateManager = SDK.IsolateManager.IsolateManager.instance();
+    const workspace = Workspace.Workspace.WorkspaceImpl.instance();
+    const resourceMapping = new Bindings.ResourceMapping.ResourceMapping(targetManager, workspace);
+    const ignoreListManager = Workspace.IgnoreListManager.IgnoreListManager.instance({forceNew: true});
+    Bindings.DebuggerWorkspaceBinding.DebuggerWorkspaceBinding.instance({
+      forceNew: true,
+      resourceMapping,
+      targetManager,
+      workspace,
+      ignoreListManager,
+    });
+    Timeline.ModificationsManager.ModificationsManager.reset();
+    traceModel = Trace.TraceModel.Model.createWithAllHandlers();
+    resourceLoader = {loadResource: sinon.stub()} as unknown as SDK.PageResourceLoader.PageResourceLoader;
+    timeline = Timeline.TimelinePanel.TimelinePanel.instance(
+        {forceNew: true, resourceLoader, targetManager, isolateManager, traceModel});
+    renderElementIntoDOM(timeline);
+  });
+
+  afterEach(() => {
+    timeline.detach();
+    Workspace.IgnoreListManager.IgnoreListManager.removeInstance();
+    Bindings.DebuggerWorkspaceBinding.DebuggerWorkspaceBinding.removeInstance();
+  });
+
+  it('should keep other tracks when the custom tracks setting is toggled', async function() {
+    const events =
+        await TraceLoader.rawEvents(this, 'extension-tracks-and-marks.json.gz') as Trace.Types.Events.Event[];
+    await timeline.loadingComplete(events, null, null);
+    const tracksBeforeDisablingSetting = timeline.getFlameChart().getMainDataProvider().timelineData().groups;
+    const data = traceModel.parsedTrace()?.data;
+    const extensionTracksInTrace = data?.ExtensionTraceData.extensionTrackData;
+    const extensionTrackInTraceNames = extensionTracksInTrace?.flatMap(
+        track => track.isTrackGroup ? [...Object.keys(track.entriesByTrack), track.name] : track.name);
+
+    assert.exists(extensionTrackInTraceNames);
+
+    // Test that extension tracks from the trace model are rendered in
+    // the flamechart data.
+    const extensionTracksInFlamechartBeforeDisabling =
+        tracksBeforeDisablingSetting
+            .filter(track =>
+                        track.jslogContext === Timeline.CompatibilityTracksAppender.VisualLoggingTrackName.EXTENSION)
+            .map(track => track.name.split(' — Custom track')[0]);
+    const nonExtensionTrackNames =
+        tracksBeforeDisablingSetting
+            .filter(track =>
+                        track.jslogContext !== Timeline.CompatibilityTracksAppender.VisualLoggingTrackName.EXTENSION)
+            .map(track => track.name);
+
+    assert.includeMembers(extensionTracksInFlamechartBeforeDisabling, extensionTrackInTraceNames.map(track => track));
+    assert.lengthOf(extensionTracksInFlamechartBeforeDisabling, extensionTrackInTraceNames.length);
+
+    // Disable setting
+    const customTracksSetting = Timeline.TimelinePanel.TimelinePanel.extensionDataVisibilitySetting();
+    customTracksSetting.set(false);
+
+    // Test that extension tracks are not rendered in the flamechart,
+    // but other tracks are.
+    const tracksAfterDisablingSetting = timeline.getFlameChart().getMainDataProvider().timelineData().groups;
+    const extensionTracksAfterDisabling = tracksAfterDisablingSetting.filter(
+        track => track.jslogContext === Timeline.CompatibilityTracksAppender.VisualLoggingTrackName.EXTENSION);
+    const trackNamesAfterDisablingSetting =
+        tracksAfterDisablingSetting.map(track => track.name.split(' — Custom track')[0]);
+    assert.lengthOf(extensionTracksAfterDisabling, 0);
+    assert.deepEqual(trackNamesAfterDisablingSetting, nonExtensionTrackNames);
+
+    // Enable setting again
+    customTracksSetting.set(true);
+
+    const tracksAfterEnablingSetting = timeline.getFlameChart().getMainDataProvider().timelineData().groups;
+    assert.deepEqual(tracksBeforeDisablingSetting, tracksAfterEnablingSetting);
+  });
+
+  it('should keep marker overlays when the custom tracks setting is toggled', async function() {
+    const events = await TraceLoader.rawEvents(this, 'web-dev.json.gz') as Trace.Types.Events.Event[];
+    await timeline.loadingComplete(events, null, null);
+    const overlaysBeforeDisablingSetting = timeline.getFlameChart().overlays().allOverlays();
+
+    // Test that overlays are rendered in the timeline
+    assert.isAbove(overlaysBeforeDisablingSetting.length, 0);
+
+    // Disable setting
+    const customTracksSetting = Timeline.TimelinePanel.TimelinePanel.extensionDataVisibilitySetting();
+    customTracksSetting.set(false);
+
+    // Test that overlays remain untouched
+    const overlaysAfterDisablingSetting = timeline.getFlameChart().overlays().allOverlays();
+    assert.deepEqual(overlaysBeforeDisablingSetting, overlaysAfterDisablingSetting);
+
+    // Enable setting again
+    customTracksSetting.set(true);
+
+    const overlaysAfterEnablingSetting = timeline.getFlameChart().overlays().allOverlays();
+    assert.deepEqual(overlaysBeforeDisablingSetting, overlaysAfterEnablingSetting);
+  });
+
+  it('keeps entries set to be dimmed as so after toggling the custom tracks setting', async function() {
+    const events = await TraceLoader.rawEvents(this, 'web-dev.json.gz') as Trace.Types.Events.Event[];
+    await timeline.loadingComplete(events, null, null);
+    const thirdPartyDimSetting = Common.Settings.Settings.instance().createSetting('timeline-dim-third-parties', false);
+
+    // Dim 3P entries.
+    thirdPartyDimSetting.set(true);
+    const dimIndicesBeforeToggle = timeline.getFlameChart().getMainFlameChart().getDimIndices();
+    assert.exists(dimIndicesBeforeToggle);
+    assert.isAbove(dimIndicesBeforeToggle.length, 0);
+
+    // Toggle the custom track setting and verify 3P entries remain dimmed.
+    Timeline.TimelinePanel.TimelinePanel.extensionDataVisibilitySetting().set(true);
+    const dimIndicesAfterToggle = timeline.getFlameChart().getMainFlameChart().getDimIndices();
+    assert.exists(dimIndicesAfterToggle);
+    assert.isAbove(dimIndicesAfterToggle.length, 0);
+  });
+
+  it('keeps annotations after toggling the custom tracks setting and does not aria alert the user twice',
+     async function() {
+       const events = await TraceLoader.rawEvents(this, 'web-dev.json.gz') as Trace.Types.Events.Event[];
+       await timeline.loadingComplete(events, null, null);
+       const data = traceModel.parsedTrace()?.data;
+       assert.isOk(data?.Meta.traceBounds.min);
+       const modificationsManager = Timeline.ModificationsManager.ModificationsManager.activeManager();
+       assert.isOk(modificationsManager);
+       const ariaAlertStub = sinon.spy(UI.ARIAUtils.LiveAnnouncer, 'alert');
+       // Add an annotation
+       modificationsManager.createAnnotation({
+         bounds: Trace.Helpers.Timing.traceWindowFromMicroSeconds(data.Meta.traceBounds.min, data.Meta.traceBounds.max),
+         type: 'TIME_RANGE',
+         label: '',
+       },
+                                             {loadedFromFile: false, muteAriaNotifications: false});
+
+       sinon.assert.calledOnceWithExactly(ariaAlertStub, 'The time range annotation has been added');
+
+       const annotationsBeforeToggle =
+           timeline.getFlameChart().overlays().allOverlays().filter(e => e.type === 'TIME_RANGE');
+       assert.exists(annotationsBeforeToggle);
+       assert.lengthOf(annotationsBeforeToggle, 1);
+
+       // Toggle the custom track setting and verify annotations remain.
+       Timeline.TimelinePanel.TimelinePanel.extensionDataVisibilitySetting().set(true);
+       const annotationsAfterToggle =
+           timeline.getFlameChart().overlays().allOverlays().filter(e => e.type === 'TIME_RANGE');
+       assert.exists(annotationsAfterToggle);
+       assert.isAbove(annotationsAfterToggle.length, 0);
+
+       // Ensure the alert wasn't fired again after the custom tracks setting
+       // was toggled.
+       sinon.assert.calledOnce(ariaAlertStub);
+     });
+
+  it('clears out AI related contexts when the user presses "Clear"', async () => {
+    const context = UI.Context.Context.instance();
+
+    const mockParsedTrace = {insights: new Map()} as Trace.TraceModel.ParsedTrace;
+    context.setFlavor(AIAssistance.AIContext.AgentFocus,
+                      AIAssistance.AIContext.AgentFocus.fromParsedTrace(mockParsedTrace));
+
+    const clearButton = timeline.element.querySelector('[aria-label="Clear"]');
+    assert.isOk(clearButton);
+    dispatchClickEvent(clearButton);
+
+    assert.isNull(context.flavor(AIAssistance.AIContext.AgentFocus));
+  });
+
+  it('includes the trace metadata when saving to a file', async function() {
+    const events = await TraceLoader.rawEvents(this, 'web-dev-with-commit.json.gz') as Trace.Types.Events.Event[];
+    const metadata = await TraceLoader.metadata(this, 'web-dev-with-commit.json.gz');
+    const fileManager = stubFileManager();
+    await timeline.loadingComplete(events, null, metadata);
+
+    await timeline.saveToFile({
+      includeResourceContent: false,
+      includeSourceMaps: false,
+      addModifications: false,
+      shouldCompress: false,
+    });
+
+    sinon.assert.calledOnce(fileManager.save);
+
+    const [, contentData] = fileManager.save.getCall(0).args;
+
+    // Assert that each value in the metadata of the JSON matches the metadata in memory.
+    // We can't do a simple deepEqual() on the two objects as the in-memory
+    // contains values that are `undefined` which do not exist in the JSON
+    // version.
+    const file = await contentDataToFile(contentData);
+    for (const k in file) {
+      const key = k as keyof Trace.Types.File.MetaData;
+      assert.deepEqual(file.metadata[key], metadata[key]);
+    }
+  });
+
+  function makeFakeBounds(min: number, max: number): Trace.Types.Timing.TraceWindowMicro {
+    return {
+      min: Trace.Types.Timing.Micro(min),
+      max: Trace.Types.Timing.Micro(max),
+      range: Trace.Types.Timing.Micro(max - min),
+    };
+  }
+
+  describe('calculateAutoZoomWindow', () => {
+    it('returns null if there are no main thread entries', () => {
+      const bounds = makeFakeBounds(100, 1000);
+      const zoomWindow = Timeline.TimelinePanel.calculateAutoZoomWindow(
+          bounds,
+          [],
+      );
+      assert.isNull(zoomWindow);
+    });
+
+    it('returns the calculated window if main thread entries exist', () => {
+      const bounds = makeFakeBounds(100, 1000);
+      const event1 = makeCompleteEvent('Program', 100, 50);
+      const event2 = makeCompleteEvent('Program', 200, 50);
+      const zoomWindow = Timeline.TimelinePanel.calculateAutoZoomWindow(
+          bounds,
+          [event1, event2],
+      );
+      assert.isNotNull(zoomWindow);
+      assert.strictEqual(zoomWindow?.min, Trace.Types.Timing.Micro(100));
+      assert.strictEqual(zoomWindow?.max, Trace.Types.Timing.Micro(257.5));
+    });
+  });
+
+  it('correctly sets minimap bounds and visible window when loading a trace with breadcrumbs', async function() {
+    const boundsManager = TraceBounds.TraceBounds.BoundsManager.instance();
+
+    const {traceEvents, metadata} = await TraceLoader.traceFile(this, 'web-dev-modifications.json.gz');
+    await timeline.loadingComplete(traceEvents as Trace.Types.Events.Event[], null, metadata);
+
+    const state = boundsManager.state();
+    assert.isOk(state);
+
+    const activeBreadcrumb =
+        Timeline.ModificationsManager.ModificationsManager.activeManager()?.getTimelineBreadcrumbs().activeBreadcrumb;
+    assert.isOk(activeBreadcrumb);
+
+    // The minimap bounds and the visible window should match the active breadcrumb window
+    // and not be overwritten by the default main-thread activity auto-zoom range.
+    assert.deepEqual(state.micro.minimapTraceBounds, activeBreadcrumb.window);
+    assert.deepEqual(state.micro.timelineTraceWindow, activeBreadcrumb.window);
+  });
+
+  describe('auto-toggling the sidebar', () => {
+    function setupStubs(config: {
+      sidebarHasBeenOpened: boolean,
+      sidebarIsShowing: boolean,
+    }): void {
+      sinon.stub(TimelineComponents.Sidebar.SidebarWidget.prototype, 'sidebarHasBeenOpened')
+          .returns(config.sidebarHasBeenOpened);
+      sinon.stub(UI.SplitWidget.SplitWidget.prototype, 'sidebarIsShowing').returns(config.sidebarIsShowing);
+    }
+
+    it('opens the sidebar once a trace is imported if the user has not seen it before', async function() {
+      setupStubs({sidebarHasBeenOpened: false, sidebarIsShowing: false});
+      const timeline = Timeline.TimelinePanel.TimelinePanel.instance(
+          {forceNew: true, resourceLoader, targetManager, isolateManager, traceModel});
+      const showBothStub = sinon.stub(timeline.splitWidget(), 'showBoth').callsFake(() => {});
+      const events = await TraceLoader.rawEvents(this, 'web-dev.json.gz') as Trace.Types.Events.Event[];
+      await timeline.loadingComplete(events, null, null);
+
+      sinon.assert.calledOnce(showBothStub);
+    });
+
+    it('does not open the sidebar if the user has seen it already', async function() {
+      setupStubs({sidebarHasBeenOpened: true, sidebarIsShowing: false});
+      const timeline = Timeline.TimelinePanel.TimelinePanel.instance(
+          {forceNew: true, resourceLoader, targetManager, isolateManager, traceModel});
+      const showBothStub = sinon.stub(timeline.splitWidget(), 'showBoth').callsFake(() => {});
+      const events = await TraceLoader.rawEvents(this, 'web-dev.json.gz') as Trace.Types.Events.Event[];
+      await timeline.loadingComplete(events, null, null);
+
+      sinon.assert.notCalled(showBothStub);
+    });
+  });
+
+  describe('executeRecordAndReload', () => {
+    it('shows the timeline view that then starts a recording', async function() {
+      const uiView = UI.ViewManager.ViewManager.instance({forceNew: true});
+      const showViewStub = sinon.stub(uiView, 'showView');
+
+      sinon.stub(timeline, 'recordReload').callsFake(() => {
+        timeline.dispatchEventToListeners(Timeline.TimelinePanel.Events.RECORDING_COMPLETED, {traceIndex: 0});
+      });
+      sinon.stub(traceModel, 'parsedTrace').returns({} as Trace.TraceModel.ParsedTrace);
+
+      await Timeline.TimelinePanel.TimelinePanel.executeRecordAndReload();
+      sinon.assert.calledWith(showViewStub, 'timeline');
+    });
+  });
+
+  describe('saveToFile', function() {
+    let fileManager: StubbedFileManager;
+    let saveSpy: sinon.SinonStub;
+    let closeSpy: sinon.SinonStub;
+
+    beforeEach(() => {
+      fileManager = stubFileManager();
+      saveSpy = fileManager.save;
+      closeSpy = fileManager.close;
+    });
+
+    describe('with gz', function() {
+      it('saves a regular trace file', async function() {
+        const {traceEvents, metadata} = await TraceLoader.traceFile(this, 'web-dev.json.gz');
+        await timeline.innerSaveToFile(traceEvents, metadata, {
+          includeResourceContent: false,
+          includeSourceMaps: false,
+          addModifications: false,
+          shouldCompress: true,
+        });
+
+        sinon.assert.calledOnce(saveSpy);
+        sinon.assert.calledOnce(closeSpy);
+
+        const [fileName, contentData] = saveSpy.getCall(0).args;
+        assert.match(fileName, /Trace-[\d|T]+\.json.gz$/);
+
+        const file = await contentDataToFile(contentData);
+        assert.isUndefined(file.metadata.enhancedTraceVersion);
+        assert.deepEqual(file.traceEvents, traceEvents);
+
+        // All `StubScriptCatchup` should have durations
+        for (const event of file.traceEvents) {
+          if (event.name === 'StubScriptCatchup') {
+            assert.isDefined(event.dur);
+          }
+        }
+      });
+
+      it('saves a CPU profile trace file', async function() {
+        const profile = await TraceLoader.rawCPUProfile(this, 'node-fibonacci-website.cpuprofile.gz');
+        const file = Trace.Helpers.SamplesIntegrator.SamplesIntegrator.createFakeTraceFromCpuProfile(
+            profile, Trace.Types.Events.ThreadID(1));
+        const {traceEvents, metadata} = file;
+
+        await timeline.innerSaveToFile(traceEvents, metadata, {
+          includeResourceContent: false,
+          includeSourceMaps: false,
+          addModifications: false,
+          shouldCompress: true,
+        });
+
+        sinon.assert.calledOnce(saveSpy);
+        sinon.assert.calledOnce(closeSpy);
+
+        const [fileName, contentData] = saveSpy.getCall(0).args;
+        assert.match(fileName, /CPU-[\d|T]+\.cpuprofile.gz$/);
+
+        const traceFile = await contentDataToFile(contentData);
+        const cpuFile = traceFile as unknown as Protocol.Profiler.Profile;
+        const profile2 = Trace.Helpers.SamplesIntegrator.SamplesIntegrator.extractCpuProfileFromFakeTrace(traceEvents);
+        assert.deepEqual(cpuFile, profile2);
+      });
+
+      it('saves an enhanced trace file without sourcemaps', async function() {
+        const {traceEvents, metadata} = await TraceLoader.traceFile(this, 'enhanced-traces.json');
+        await timeline.innerSaveToFile(traceEvents, metadata, {
+          includeResourceContent: true,
+          includeSourceMaps: false,
+          addModifications: false,
+          shouldCompress: true,
+        });
+
+        sinon.assert.calledOnce(saveSpy);
+        sinon.assert.calledOnce(closeSpy);
+
+        const [fileName, contentData] = saveSpy.getCall(0).args;
+        assert.match(fileName, /Trace-[\d|T]+\.json\.gz$/);
+
+        const file = await contentDataToFile(contentData);
+        assert.isDefined(file.metadata.enhancedTraceVersion);
+        assert.isUndefined(file.metadata.sourceMaps);
+      });
+
+      it('saves an enhanced trace file with sourcemaps', async function() {
+        const {traceEvents, metadata} = await TraceLoader.traceFile(this, 'dupe-js-inline-maps.json.gz');
+        await timeline.innerSaveToFile(traceEvents, metadata, {
+          includeResourceContent: true,
+          includeSourceMaps: true,
+          addModifications: false,
+          shouldCompress: true,
+        });
+
+        sinon.assert.calledOnce(saveSpy);
+        sinon.assert.calledOnce(closeSpy);
+
+        const [fileName, contentData] = saveSpy.getCall(0).args;
+        assert.match(fileName, /Trace-[\d|T]+\.json\.gz$/);
+
+        const file = await contentDataToFile(contentData);
+        assert.isDefined(file.metadata.enhancedTraceVersion);
+        assert.isDefined(file.metadata.sourceMaps);
+      });
+
+      it('saves a trace file with modifications', async function() {
+        const {traceEvents, metadata} = await TraceLoader.traceFile(this, 'web-dev.json.gz');
+        // Load to initialize modification manager
+        await timeline.loadingComplete(traceEvents as Trace.Types.Events.Event[], null, metadata);
+        const modificationsManager = Timeline.ModificationsManager.ModificationsManager.activeManager();
+        assert.isOk(modificationsManager);
+
+        modificationsManager.createAnnotation({
+          bounds: Trace.Helpers.Timing.traceWindowFromMicroSeconds(Trace.Types.Timing.Micro(1),
+                                                                   Trace.Types.Timing.Micro(2)),
+          type: 'TIME_RANGE',
+          label: 'Test Annotation',
+        },
+                                              {loadedFromFile: false, muteAriaNotifications: false});
+
+        await timeline.saveToFile({
+          includeResourceContent: false,
+          includeSourceMaps: false,
+          addModifications: true,
+          shouldCompress: true,
+        });
+
+        sinon.assert.calledOnce(saveSpy);
+        sinon.assert.calledOnce(closeSpy);
+
+        const [, contentData] = saveSpy.getCall(0).args;
+        const file = await contentDataToFile(contentData);
+        assert.isDefined(file.metadata.modifications);
+        assert.lengthOf(file.metadata.modifications.annotations.labelledTimeRanges, 1);
+        assert.strictEqual(file.metadata.modifications.annotations.labelledTimeRanges[0].label, 'Test Annotation');
+      });
+    });
+
+    describe('without gz', function() {
+      it('saves a regular trace file', async function() {
+        const {traceEvents, metadata} = await TraceLoader.traceFile(this, 'web-dev.json.gz');
+        await timeline.innerSaveToFile(traceEvents, metadata, {
+          includeResourceContent: false,
+          includeSourceMaps: false,
+          addModifications: false,
+          shouldCompress: false,
+        });
+
+        sinon.assert.calledOnce(saveSpy);
+        sinon.assert.calledOnce(closeSpy);
+
+        const [fileName, contentData] = saveSpy.getCall(0).args;
+        assert.match(fileName, /Trace-[\d|T]+\.json$/);
+
+        const file = await contentDataToFile(contentData);
+        assert.isUndefined(file.metadata.enhancedTraceVersion);
+        assert.deepEqual(file.traceEvents, traceEvents);
+      });
+    });
+
+    describe('removes chrome-extensions content', function() {
+      it('from trace events when saving a trace with "Include script content" on', async function() {
+        const {traceEvents, metadata} =
+            await TraceLoader.traceFile(this, 'chrome-ext-sourcemap-script-content.json.gz');
+        await timeline.loadingComplete(traceEvents as Trace.Types.Events.Event[], null, metadata);
+
+        // 7192505913775043000.8 matches a chrome-extension script in the trace
+        let extensionTracesWithContent = traceEvents.filter(value => {
+          return value.cat === 'disabled-by-default-devtools.v8-source-rundown-sources' &&
+              `${(value as Trace.Types.Events.RundownScriptSource).args.data.isolate}.${
+                  (value as Trace.Types.Events.RundownScriptSource).args.data.scriptId}` === '7192505913775043000.8';
+        });
+
+        // loading the trace and verifying the chrome extension script has associated source text
+        let castedEvent = (extensionTracesWithContent[0] as Trace.Types.Events.RundownScriptSource);
+        assert.lengthOf(extensionTracesWithContent, 1);
+        assert.isDefined(castedEvent.args.data.sourceText);
+
+        await timeline.saveToFile({
+          includeResourceContent: true,
+          includeSourceMaps: false,
+          addModifications: false,
+          shouldCompress: false,
+        });
+
+        sinon.assert.calledOnce(saveSpy);
+        sinon.assert.calledOnce(closeSpy);
+
+        const [fileName, contentData] = saveSpy.getCall(0).args;
+        assert.match(fileName, /Trace-[\d|T]+\.json$/);
+
+        const file = await contentDataToFile(contentData);
+        assert.isDefined(file.metadata.enhancedTraceVersion);
+
+        // getting the same trace as before, but this time after saving has happened.
+        extensionTracesWithContent = file.traceEvents?.filter(value => {
+          return value.cat === 'disabled-by-default-devtools.v8-source-rundown-sources' &&
+              `${(value as Trace.Types.Events.RundownScriptSource).args.data.isolate}.${
+                  (value as Trace.Types.Events.RundownScriptSource).args.data.scriptId}` === '7192505913775043000.8';
+        });
+
+        // the associated source text is now undefined from the chrome-extension script
+        castedEvent = (extensionTracesWithContent[0] as Trace.Types.Events.RundownScriptSource);
+        assert.lengthOf(extensionTracesWithContent, 1);
+        assert.isUndefined(castedEvent.args.data.sourceText);
+
+        // non-extension script content is still present (7192505913775043000.10)
+        extensionTracesWithContent = file.traceEvents?.filter(value => {
+          return value.cat === 'disabled-by-default-devtools.v8-source-rundown-sources' &&
+              `${(value as Trace.Types.Events.RundownScriptSource).args.data.isolate}.${
+                  (value as Trace.Types.Events.RundownScriptSource).args.data.scriptId}` === '7192505913775043000.10';
+        });
+        castedEvent = (extensionTracesWithContent[0] as Trace.Types.Events.RundownScriptSource);
+        assert.lengthOf(extensionTracesWithContent, 1);
+        assert.isDefined(castedEvent.args.data.sourceText);
+      });
+
+      it('from trace sourcemaps when saving a trace with "Include source map" on', async function() {
+        const {traceEvents, metadata} =
+            await TraceLoader.traceFile(this, 'chrome-ext-sourcemap-script-content.json.gz');
+
+        await timeline.innerSaveToFile(traceEvents, metadata, {
+          includeResourceContent: true,
+          includeSourceMaps: true,
+          addModifications: false,
+          shouldCompress: false,
+        });
+
+        sinon.assert.calledOnce(saveSpy);
+        sinon.assert.calledOnce(closeSpy);
+
+        const [fileName, contentData] = saveSpy.getCall(0).args;
+        assert.match(fileName, /Trace-[\d|T]+\.json$/);
+
+        const file = await contentDataToFile(contentData);
+        assert.isDefined(file.metadata.enhancedTraceVersion);
+
+        const totalSourceMapsWithChromExtensionProtocol = file.metadata.sourceMaps?.filter(value => {
+          value.url.startsWith('chrome-extension:');
+        });
+        assert.isNotNull(totalSourceMapsWithChromExtensionProtocol);
+        assert.strictEqual(totalSourceMapsWithChromExtensionProtocol?.length, 0);
+      });
+    });
+  });
+
+  it('correctly flags recording as fresh when stopped automatically', async function() {
+    const events = await TraceLoader.rawEvents(this, 'web-dev.json.gz') as Trace.Types.Events.Event[];
+    timeline['setState'](Timeline.TimelinePanel.State.RECORDING);
+    await timeline.loadingStarted();
+    await timeline.loadingComplete(events, null, null);
+
+    const parsedTrace = traceModel.parsedTrace();
+    assert.isOk(parsedTrace);
+    assert.isTrue(Tracing.FreshRecording.Tracker.instance().recordingIsFresh(parsedTrace));
+  });
+
+  describe('console.profile confirmation dialog', () => {
+    it('loads CPU profile when user accepts confirmation dialog', async function() {
+      const showDialogStub = sinon.stub(UI.UIUtils.ConfirmDialog, 'show').resolves(true);
+      const loadFromCpuProfileStub =
+          sinon.stub(timeline, 'loadFromCpuProfile' as keyof Timeline.TimelinePanel.TimelinePanel);
+      const showViewStub = sinon.stub(UI.ViewManager.ViewManager.instance(), 'showView').resolves();
+      const fakeCpuProfile = {} as Protocol.Profiler.Profile;
+
+      const revealer = new Timeline.TimelinePanel.ProfileFinishedRevealer();
+      await revealer.reveal({
+        title: 'Test Profile',
+        cpuProfile: fakeCpuProfile,
+      } as SDK.CPUProfilerModel.ProfileFinishedData);
+
+      sinon.assert.calledOnce(showDialogStub);
+      assert.strictEqual(showDialogStub.getCall(0).args[0],
+                         'Do you want to load the recorded CPU profile "Test Profile" into the Performance panel?');
+      assert.strictEqual(showDialogStub.getCall(0).args[1], 'Load CPU profile?');
+      assert.isUndefined(showDialogStub.getCall(0).args[2]);
+      assert.deepEqual(showDialogStub.getCall(0).args[3], {jslogContext: 'load-cpu-profile-confirmation'});
+      sinon.assert.calledOnceWithExactly(loadFromCpuProfileStub, fakeCpuProfile, 'Test Profile');
+      sinon.assert.calledOnceWithExactly(showViewStub, 'timeline');
+    });
+
+    it('does not load CPU profile when user rejects confirmation dialog', async function() {
+      const showDialogStub = sinon.stub(UI.UIUtils.ConfirmDialog, 'show').resolves(false);
+      const loadFromCpuProfileStub =
+          sinon.stub(timeline, 'loadFromCpuProfile' as keyof Timeline.TimelinePanel.TimelinePanel);
+      const fakeCpuProfile = {} as Protocol.Profiler.Profile;
+
+      const revealer = new Timeline.TimelinePanel.ProfileFinishedRevealer();
+      await revealer.reveal({
+        title: 'Test Profile',
+        cpuProfile: fakeCpuProfile,
+      } as SDK.CPUProfilerModel.ProfileFinishedData);
+
+      sinon.assert.calledOnce(showDialogStub);
+      sinon.assert.notCalled(loadFromCpuProfileStub);
+    });
+
+    it('falls back to "Untitled" when profile title is empty', async function() {
+      const showDialogStub = sinon.stub(UI.UIUtils.ConfirmDialog, 'show').resolves(true);
+      sinon.stub(timeline, 'loadFromCpuProfile' as keyof Timeline.TimelinePanel.TimelinePanel);
+      sinon.stub(UI.ViewManager.ViewManager.instance(), 'showView').resolves();
+      const fakeCpuProfile = {} as Protocol.Profiler.Profile;
+
+      const revealer = new Timeline.TimelinePanel.ProfileFinishedRevealer();
+      await revealer.reveal({
+        title: '',
+        cpuProfile: fakeCpuProfile,
+      } as SDK.CPUProfilerModel.ProfileFinishedData);
+
+      sinon.assert.calledOnce(showDialogStub);
+      assert.strictEqual(showDialogStub.getCall(0).args[0],
+                         'Do you want to load the recorded CPU profile "Untitled" into the Performance panel?');
+    });
+
+    it('queues confirmation dialogs sequentially', async function() {
+      let resolveFirstDialog!: (value: boolean) => void;
+      const firstDialogPromise = new Promise<boolean>(resolve => {
+        resolveFirstDialog = resolve;
+      });
+
+      const showDialogStub = sinon.stub(UI.UIUtils.ConfirmDialog, 'show');
+      showDialogStub.onFirstCall().returns(firstDialogPromise);
+      showDialogStub.onSecondCall().resolves(true);
+
+      sinon.stub(timeline, 'loadFromCpuProfile' as keyof Timeline.TimelinePanel.TimelinePanel);
+      sinon.stub(UI.ViewManager.ViewManager.instance(), 'showView').resolves();
+      const fakeCpuProfile = {} as Protocol.Profiler.Profile;
+
+      const revealer1 = new Timeline.TimelinePanel.ProfileFinishedRevealer();
+      const revealer2 = new Timeline.TimelinePanel.ProfileFinishedRevealer();
+
+      const p1 = revealer1.reveal({title: 'Profile 1', cpuProfile: fakeCpuProfile} as
+                                  SDK.CPUProfilerModel.ProfileFinishedData);
+      const p2 = revealer2.reveal({title: 'Profile 2', cpuProfile: fakeCpuProfile} as
+                                  SDK.CPUProfilerModel.ProfileFinishedData);
+
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      sinon.assert.calledOnce(showDialogStub);
+
+      resolveFirstDialog(true);
+      await p1;
+      await p2;
+
+      sinon.assert.calledTwice(showDialogStub);
+      assert.strictEqual(showDialogStub.getCall(1).args[0],
+                         'Do you want to load the recorded CPU profile "Profile 2" into the Performance panel?');
+    });
+
+    it('continues processing subsequent profiles even if a previous profile load fails', async function() {
+      const showDialogStub = sinon.stub(UI.UIUtils.ConfirmDialog, 'show').resolves(true);
+      const showViewStub = sinon.stub(UI.ViewManager.ViewManager.instance(), 'showView');
+      showViewStub.onFirstCall().rejects(new Error('Failed to show view'));
+      showViewStub.onSecondCall().resolves();
+
+      sinon.stub(timeline, 'loadFromCpuProfile' as keyof Timeline.TimelinePanel.TimelinePanel);
+      const fakeCpuProfile = {} as Protocol.Profiler.Profile;
+
+      const revealer1 = new Timeline.TimelinePanel.ProfileFinishedRevealer();
+      const revealer2 = new Timeline.TimelinePanel.ProfileFinishedRevealer();
+
+      const p1 = revealer1.reveal({title: 'Profile 1', cpuProfile: fakeCpuProfile} as
+                                  SDK.CPUProfilerModel.ProfileFinishedData);
+      const p2 = revealer2.reveal({title: 'Profile 2', cpuProfile: fakeCpuProfile} as
+                                  SDK.CPUProfilerModel.ProfileFinishedData);
+
+      let p1Error: Error|null = null;
+      try {
+        await p1;
+      } catch (err) {
+        p1Error = err as Error;
+      }
+      assert.isNotNull(p1Error);
+      assert.strictEqual(p1Error?.message, 'Failed to show view');
+      await p2;
+
+      sinon.assert.calledTwice(showDialogStub);
+    });
+  });
+});

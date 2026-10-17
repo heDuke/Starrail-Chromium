@@ -1,0 +1,18 @@
+name: Rustfmt
+on: pull_request
+
+jobs:
+  rustfmt:
+    name: "Rustfmt"
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Configure the Rust toolchain and target using rustup
+        run: rustup toolchain install nightly --component rustfmt
+      - uses: LoliGothick/rustfmt-check@995f4ad3416208c983ed97d4d4b66b33446a7bc3 # v0.5.0
+        with:
+            token: ${{ secrets.GITHUB_TOKEN }}

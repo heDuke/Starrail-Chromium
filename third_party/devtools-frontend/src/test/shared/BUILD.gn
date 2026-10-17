@@ -1,0 +1,22 @@
+# Copyright 2020 The Chromium Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("../../scripts/build/typescript/typescript.gni")
+
+node_ts_library("shared") {
+  sources = [
+    "debug-check.ts",
+    "helper.ts",
+    "mocha-resultsdb-reporter.ts",
+    "run-mocha.ts",
+    "screenshots.ts",
+  ]
+
+  deps = [
+    "../../front_end/testing:mocha_helpers",
+    "../../front_end/testing:test_id_generation",
+    "../conductor:implementation",
+    "../e2e/shared",
+  ]
+}

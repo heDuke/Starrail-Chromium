@@ -1,0 +1,281 @@
+// Copyright 2024 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+import {assert} from 'chai';
+import sinon from 'sinon';
+
+import * as Common from '../../../core/common/common.js';
+import * as Platform from '../../../core/platform/platform.js';
+import * as SDK from '../../../core/sdk/sdk.js';
+import type * as Protocol from '../../../generated/protocol.js';
+import * as Bindings from '../../../models/bindings/bindings.js';
+import * as Formatter from '../../../models/formatter/formatter.js';
+import * as Trace from '../../../models/trace/trace.js';
+import * as SourceMapsResolver from '../../../models/trace_source_maps_resolver/trace_source_maps_resolver.js';
+import * as Workspace from '../../../models/workspace/workspace.js';
+import {setupLocaleHooks} from '../../../testing/LocaleHelpers.js';
+import {MockDebuggerBackend} from '../../../testing/MockScopeChain.js';
+import {setupRuntimeHooks} from '../../../testing/RuntimeHelpers.js';
+import {setupSettingsHooks} from '../../../testing/SettingsHelpers.js';
+import {encodeSourceMap} from '../../../testing/SourceMapEncoder.js';
+import {
+  makeMockSamplesHandlerData,
+  makeProfileCall,
+} from '../../../testing/TraceHelpers.js';
+
+import * as Utils from './utils.js';
+
+const {urlString} = Platform.DevToolsPath;
+export async function loadCodeLocationResolvingScenario(): Promise<{
+  authoredScriptURL: string,
+  genScriptURL: string,
+  scriptId: Protocol.Runtime.ScriptId,
+  ignoreListedURL: string,
+  contentScriptURL: string,
+  contentScriptId: Protocol.Runtime.ScriptId,
+}> {
+  const backend = new MockDebuggerBackend();
+  const target = backend.createTarget();
+
+  sinon.stub(Bindings.DebuggerWorkspaceBinding.DebuggerWorkspaceBinding, 'instance')
+      .returns(backend.universe.debuggerWorkspaceBinding);
+  sinon.stub(Workspace.IgnoreListManager.IgnoreListManager, 'instance').returns(backend.universe.ignoreListManager);
+  sinon.stub(Workspace.Workspace.WorkspaceImpl, 'instance').returns(backend.universe.workspace);
+  sinon.stub(SDK.TargetManager.TargetManager, 'instance').returns(backend.universe.targetManager);
+  sinon.stub(SDK.PageResourceLoader.PageResourceLoader, 'instance').returns(backend.universe.pageResourceLoader);
+  sinon.stub(Common.Settings.Settings, 'instance').returns(backend.universe.settings);
+  sinon.stub(Formatter.FormatterWorkerPool.FormatterWorkerPool.instance(), 'javaScriptScopeTree').resolves(null);
+
+  const debuggerWorkspaceBinding = backend.universe.debuggerWorkspaceBinding;
+
+  // The following mock data creates a source mapping from two authored
+  // scripts to a single complied script. One of the sources
+  // (ignored.ts) is marked as ignore listed in the source map.
+  const sourceRoot = 'http://example.com';
+  const scriptInfo = {
+    url: `${sourceRoot}/test.out.js`,
+    content: 'function f(x) {\n  console.log(x);\n}\nfunction ignore(y){\n console.log(y);\n}',
+  };
+  const authoredScriptName = 'test.ts';
+  const ignoredScriptName = 'ignored.ts';
+  const authoredScriptURL = `${sourceRoot}/${authoredScriptName}`;
+  const ignoreListedScriptURL = `${sourceRoot}/${ignoredScriptName}`;
+  const sourceMap = encodeSourceMap(
+      [
+        `0:9 => ${authoredScriptName}:0:1`,
+        `1:0 => ${authoredScriptName}:4:0`,
+        `1:2 => ${authoredScriptName}:4:2`,
+        `2:0 => ${authoredScriptName}:2:0`,
+        `3:0 => ${ignoredScriptName}:3:0`,
+      ],
+      sourceRoot);
+  sourceMap.sources = [authoredScriptURL, ignoreListedScriptURL];
+  sourceMap.ignoreList = [1];
+  const sourceMapInfo = {
+    url: `${scriptInfo.url}.map`,
+    content: sourceMap,
+  };
+
+  // The following mock data creates content script
+  const contentScriptInfo = {
+    url: `${sourceRoot}/content-script.js`,
+    content: 'console.log("content script loaded");',
+    isContentScript: true,
+  };
+
+  // Load mock data in devtools
+  const [, , script, , contentScript] = await Promise.all([
+    debuggerWorkspaceBinding.waitForUISourceCodeAdded(urlString`${authoredScriptURL}`, target),
+    debuggerWorkspaceBinding.waitForUISourceCodeAdded(urlString`${ignoreListedScriptURL}`, target),
+    backend.addScript(target, scriptInfo, sourceMapInfo),
+    debuggerWorkspaceBinding.waitForUISourceCodeAdded(urlString`${contentScriptInfo.url}`, target),
+    backend.addScript(target, contentScriptInfo, null),
+  ]);
+
+  return {
+    authoredScriptURL,
+    scriptId: script.scriptId,
+    genScriptURL: scriptInfo.url,
+    ignoreListedURL: ignoreListedScriptURL,
+    contentScriptURL: contentScriptInfo.url,
+    contentScriptId: contentScript.scriptId,
+  };
+}
+
+describe('isIgnoreListedEntry', () => {
+  setupRuntimeHooks();
+  setupSettingsHooks();
+  setupLocaleHooks();
+
+  afterEach(() => {
+    sinon.restore();
+  });
+  it('uses url mappings to determine if an url is ignore listed', async () => {
+    const {authoredScriptURL, genScriptURL, scriptId} = await loadCodeLocationResolvingScenario();
+
+    const LINE_NUMBER = 0;
+    const COLUMN_NUMBER = 9;
+
+    const profileCallWithMappings =
+        makeProfileCall('function', 10, 100, Trace.Types.Events.ProcessID(1), Trace.Types.Events.ThreadID(1));
+    profileCallWithMappings.callFrame = {
+      lineNumber: LINE_NUMBER,
+      columnNumber: COLUMN_NUMBER,
+      functionName: 'minified',
+      scriptId,
+      url: genScriptURL,
+    };
+
+    const workersData: Trace.Handlers.ModelHandlers.Workers.WorkersData = {
+      workerSessionIdEvents: [],
+      workerIdByThread: new Map(),
+      workerURLById: new Map(),
+    };
+
+    Workspace.IgnoreListManager.IgnoreListManager.instance().ignoreListURL(urlString`${authoredScriptURL}`);
+    const traceWithMappings = {
+      Samples: makeMockSamplesHandlerData([profileCallWithMappings]),
+      Workers: workersData,
+    } as Trace.Handlers.Types.HandlerData;
+    const parsedTrace = {data: traceWithMappings} as Trace.TraceModel.ParsedTrace;
+    const resolver = new SourceMapsResolver.SourceMapsResolver(parsedTrace);
+    await resolver.install();
+    assert.isTrue(Utils.IgnoreList.isIgnoreListedEntry(profileCallWithMappings));
+  });
+
+  it('ignores entries with a url in the source map\'s ignoreList field when the user enables known third party ignoring',
+     async () => {
+       const {ignoreListedURL, scriptId} = await loadCodeLocationResolvingScenario();
+
+       // This matches the location mapping added to the sourcemap.
+       const LINE_NUMBER = 3;
+       const COLUMN_NUMBER = 0;
+
+       const profileCallWithMappings =
+           makeProfileCall('function', 10, 100, Trace.Types.Events.ProcessID(1), Trace.Types.Events.ThreadID(1));
+       profileCallWithMappings.callFrame = {
+         lineNumber: LINE_NUMBER,
+         columnNumber: COLUMN_NUMBER,
+         functionName: 'ignore',
+         scriptId,
+         url: ignoreListedURL,
+       };
+
+       const workersData: Trace.Handlers.ModelHandlers.Workers.WorkersData = {
+         workerSessionIdEvents: [],
+         workerIdByThread: new Map(),
+         workerURLById: new Map(),
+       };
+       const traceWithMappings = {
+         Samples: makeMockSamplesHandlerData([profileCallWithMappings]),
+         Workers: workersData,
+       } as Trace.Handlers.Types.HandlerData;
+       const parsedTrace = {data: traceWithMappings} as Trace.TraceModel.ParsedTrace;
+       const resolver = new SourceMapsResolver.SourceMapsResolver(parsedTrace);
+       await resolver.install();
+       assert.isTrue(Utils.IgnoreList.isIgnoreListedEntry(profileCallWithMappings));
+       const ignoreKnownThirdPartySetting =
+           Common.Settings.Settings.instance().moduleSetting('automatically-ignore-list-known-third-party-scripts');
+       const ignoreKnownThirdPartySettingValue = ignoreKnownThirdPartySetting.get();
+
+       ignoreKnownThirdPartySetting.set(true);
+       assert.isTrue(Utils.IgnoreList.isIgnoreListedEntry(profileCallWithMappings));
+       assert.strictEqual(
+           'Marked with ignoreList in source map', Utils.IgnoreList.getIgnoredReasonString(profileCallWithMappings));
+
+       ignoreKnownThirdPartySetting.set(false);
+       assert.isFalse(Utils.IgnoreList.isIgnoreListedEntry(profileCallWithMappings));
+
+       // restore to the original value.
+       ignoreKnownThirdPartySetting.set(ignoreKnownThirdPartySettingValue);
+     });
+  it('ignores entries belonging to content script when the user enables content script ignoring', async () => {
+    const {contentScriptURL, contentScriptId: scriptId} = await loadCodeLocationResolvingScenario();
+
+    const LINE_NUMBER = 0;
+    const COLUMN_NUMBER = 0;
+
+    const profileCallWithContentScript =
+        makeProfileCall('function', 10, 100, Trace.Types.Events.ProcessID(1), Trace.Types.Events.ThreadID(1));
+    profileCallWithContentScript.callFrame = {
+      lineNumber: LINE_NUMBER,
+      columnNumber: COLUMN_NUMBER,
+      functionName: '',
+      scriptId,
+      url: contentScriptURL,
+    };
+
+    const workersData: Trace.Handlers.ModelHandlers.Workers.WorkersData = {
+      workerSessionIdEvents: [],
+      workerIdByThread: new Map(),
+      workerURLById: new Map(),
+    };
+    const traceWithMappings = {
+      Samples: makeMockSamplesHandlerData([profileCallWithContentScript]),
+      Workers: workersData,
+    } as Trace.Handlers.Types.HandlerData;
+    const parsedTrace = {data: traceWithMappings} as Trace.TraceModel.ParsedTrace;
+    const resolver = new SourceMapsResolver.SourceMapsResolver(parsedTrace);
+    await resolver.install();
+    assert.isTrue(Utils.IgnoreList.isIgnoreListedEntry(profileCallWithContentScript));
+
+    const ignoreContentScriptSetting = Common.Settings.Settings.instance().moduleSetting('skip-content-scripts');
+    const ignoreContentScriptSettingValue = ignoreContentScriptSetting.get();
+
+    ignoreContentScriptSetting.set(true);
+    assert.isTrue(Utils.IgnoreList.isIgnoreListedEntry(profileCallWithContentScript));
+    assert.strictEqual('Content script', Utils.IgnoreList.getIgnoredReasonString(profileCallWithContentScript));
+
+    ignoreContentScriptSetting.set(false);
+    assert.isFalse(Utils.IgnoreList.isIgnoreListedEntry(profileCallWithContentScript));
+
+    // restore to the original value.
+    ignoreContentScriptSetting.set(ignoreContentScriptSettingValue);
+  });
+
+  it('get the first matched rule for the ignored script', async () => {
+    const backend = new MockDebuggerBackend();
+
+    sinon.stub(Bindings.DebuggerWorkspaceBinding.DebuggerWorkspaceBinding, 'instance')
+        .returns(backend.universe.debuggerWorkspaceBinding);
+    sinon.stub(Workspace.IgnoreListManager.IgnoreListManager, 'instance').returns(backend.universe.ignoreListManager);
+    sinon.stub(Workspace.Workspace.WorkspaceImpl, 'instance').returns(backend.universe.workspace);
+    sinon.stub(SDK.TargetManager.TargetManager, 'instance').returns(backend.universe.targetManager);
+    sinon.stub(SDK.PageResourceLoader.PageResourceLoader, 'instance').returns(backend.universe.pageResourceLoader);
+    sinon.stub(Common.Settings.Settings, 'instance').returns(backend.universe.settings);
+    ignoreRegex('youtube*');
+    const url = urlString`https://www.youtube.com/s/desktop/2ebf714b/jsbin/desktop_polymer.vflset/desktop_polymer.js`;
+    Workspace.IgnoreListManager.IgnoreListManager.instance().ignoreListURL(url);
+
+    const entry = makeProfileCall(
+        'function name', 10, 100, Trace.Types.Events.ProcessID(1), Trace.Types.Events.ThreadID(1), /* nodeId= */ 1,
+        url);
+    // There are two matched rules (in order)
+    // - youtube*
+    // - \\/desktop_polymer\\.js$ (generated by the URL)
+    // So the first matched one is `youtube*`
+    assert.strictEqual('youtube*', Utils.IgnoreList.getIgnoredReasonString(entry));
+
+    unignoreRegex('youtube*');
+    // Now There is only one matched rule.
+    assert.strictEqual('\\/desktop_polymer\\.js$', Utils.IgnoreList.getIgnoredReasonString(entry));
+  });
+});
+
+function ignoreRegex(regexValue: string): void {
+  const regexPatterns =
+      (Common.Settings.Settings.instance().moduleSetting('skip-stack-frames-pattern') as Common.Settings.RegExpSetting)
+          .getAsArray();
+  regexPatterns.push({pattern: regexValue, disabled: false});
+}
+
+function unignoreRegex(regexValue: string): void {
+  const regexPatterns =
+      (Common.Settings.Settings.instance().moduleSetting('skip-stack-frames-pattern') as Common.Settings.RegExpSetting)
+          .getAsArray();
+  const result = regexPatterns.filter(regexPattern => regexPattern.pattern !== regexValue);
+
+  (Common.Settings.Settings.instance().moduleSetting('skip-stack-frames-pattern') as Common.Settings.RegExpSetting)
+      .setAsArray(result);
+}

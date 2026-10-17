@@ -1,0 +1,28 @@
+# Copyright 2019 The Chromium Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# This file is used by the GN meta build system to find the root of the source
+# tree and to set startup options. For documentation on the values set in this
+# file, run "gn help dotfile" at the command line.
+
+assert(
+    gn_version >= 2459,
+    "Your GN version is too old. To fix this, try the following:\n" +
+        "1. Usually, running `gclient sync` will update GN.\n" + "2. If you are using an integrated checkout inside a Chromium tree, depot_tools might be picking up Chromium's older GN instead of DevTools'. In that case, update your Chromium checkout and run `gclient sync` in Chromium checkout.")
+
+# The location of the build configuration file.
+buildconfig = "//build_overrides/BUILDCONFIG.gn"
+
+# These are the targets to check headers for by default. The files in targets
+# matching these patterns (see "gn help label_pattern" for format) will have
+# their includes checked for proper dependencies when you run either
+# "gn check" or "gn gen --check".
+check_targets = [ "*" ]
+
+script_executable = "python3"
+
+default_args = {
+  # Use Siso instead of Ninja.
+  use_siso = true
+}
