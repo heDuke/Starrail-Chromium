@@ -32,6 +32,11 @@ to trademarks, proprietary services, or absent internal source.
 ## Checkout
 
 Clone this repository with Git LFS installed, then run `git lfs pull` to fetch
-large fixtures. The private application pins a specific public module commit.
+large fixtures. The tracked `.lfsconfig` points to the public
+[Starrail-Chromium-LFS](https://github.com/heDuke/Starrail-Chromium-LFS) store,
+because GitHub's Chromium fork network does not accept new LFS objects.
+GitHub's automatic source ZIP does not include files from a custom LFS endpoint;
+use Git LFS for the complete fixture.
+The private application pins a specific public module commit.
 Subsequent upstream synchronization must preserve the pinned manifest and
 explicitly review any source changes.
