@@ -1,0 +1,12 @@
+diff --git a/arm_compute/core/utils/logging/IPrinter.h b/arm_compute/core/utils/logging/IPrinter.h
+index 09427792a7..e9e85000e6 100644
+--- a/arm_compute/core/utils/logging/IPrinter.h
++++ b/arm_compute/core/utils/logging/IPrinter.h
+@@ -29,6 +29,7 @@
+  */
+ 
+ #include "support/Mutex.h"
++#include <string>
+ 
+ namespace arm_compute
+ {
