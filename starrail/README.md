@@ -16,6 +16,11 @@ Build outputs, caches, Git databases, and downloaded compiler/SDK tools are
 excluded. Large upstream source/test fixtures use Git LFS. Installed npm
 source packages are included; file checksums are in `npm-source-manifest.json`.
 
+At each flattened Git dependency boundary, the root attributes reset inherited
+text/EOL handling. The dependency's own attributes and original source blobs
+are retained, so Chromium's parent rules do not normalize unrelated upstream
+files or make an unchanged checkout appear modified.
+
 The private Starrail application references `starrail/engine` as its Android
 library module. That library currently defines the embedding interface and
 an explicit unavailable placeholder; it does not yet render webpages.
