@@ -1,7 +1,7 @@
 {
   "chromium_version": "153.0.8010.27",
   "chromium_commit": "ac9b84a0b321cc741e9eb650f29e7177b68f0f48",
-  "scope": "All tracked files from local Chromium and checked-out Git dependencies; installed npm sources are recorded separately.",
+  "scope": "All tracked source files from the local Chromium and checked-out Git dependencies, plus installed npm source packages.",
   "repositories": [
     {
       "path": ".",
@@ -3185,5 +3185,11 @@
     "build outputs and caches",
     "downloaded compiler/SDK/runtime tools",
     "upstream dependencies not present in the local checkout"
-  ]
+  ],
+  "npm_source_roots": [
+    "third_party/node/node_modules",
+    "third_party/js_code_coverage/node_modules",
+    "third_party/devtools-frontend/src/node_modules"
+  ],
+  "source_import_complete": true
 }

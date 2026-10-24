@@ -4,7 +4,7 @@ This public repository contains the Chromium source available in the local
 Starrail development checkout, pinned to **153.0.8010.27**,
 `ac9b84a0b321cc741e9eb650f29e7177b68f0f48`.
 
-The import is in progress. `source-manifest.json` records the actual local
+`source-manifest.json` records the actual local
 commits of Chromium and every checked-out Git dependency. Dependencies are
 vendored as ordinary files so their source can be browsed here. Upstream
 dependencies that were absent locally, including optional Google-internal
@@ -14,7 +14,7 @@ claimed to be included. Original Git link configuration is archived in
 
 Build outputs, caches, Git databases, and downloaded compiler/SDK tools are
 excluded. Large upstream source/test fixtures use Git LFS. Installed npm
-source packages will be imported separately.
+source packages are included; file checksums are in `npm-source-manifest.json`.
 
 The private Starrail application references `starrail/engine` as its Android
 library module. That library currently defines the embedding interface and
