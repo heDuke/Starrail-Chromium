@@ -60,3 +60,7 @@ third_party/** -tricium
 
 # Large upstream source/test data retained through Git LFS.
 third_party/swiftshader/tests/regres/testlists/vk-master-NOT_SUPPORTED.txt filter=lfs diff=lfs merge=lfs -text
+
+third_party/node/node_modules/** -text
+
+third_party/js_code_coverage/node_modules/** -text

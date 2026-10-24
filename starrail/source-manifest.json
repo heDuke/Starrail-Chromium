@@ -3188,8 +3188,7 @@
   ],
   "npm_source_roots": [
     "third_party/node/node_modules",
-    "third_party/js_code_coverage/node_modules",
-    "third_party/devtools-frontend/src/node_modules"
+    "third_party/js_code_coverage/node_modules"
   ],
   "source_import_complete": true
 }
